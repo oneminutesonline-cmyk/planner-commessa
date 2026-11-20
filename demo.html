@@ -1,0 +1,664 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>Planner di commessa</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+/* Layout: banda in alto con KPI, poi allerte + Gantt, poi cantiere, programma, import. Strumento da tecnico: denso, leggibile. */
+:root{
+  --bg:#f3f4f2; --panel:#ffffff; --fg:#1d2321; --muted:#5f6a66; --line:#d9ddd9;
+  --accent:#d9661f; --base:#b9c0bc; --ok:#2f7d55; --warn:#b7791f; --crit:#c0392b; --ahead:#2b6cb0;
+  --chip:#eceeeb; --sum:#3b4541;
+  --f-body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#151918; --panel:#1d2321; --fg:#e7ebe8; --muted:#9aa6a1; --line:#2f3734;
+  --accent:#ef8a45; --base:#4a5551; --ok:#4fb07c; --warn:#d9a441; --crit:#e5675a; --ahead:#6aa5e0; --chip:#262d2a; --sum:#c9d1cd; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#151918; --panel:#1d2321; --fg:#e7ebe8; --muted:#9aa6a1; --line:#2f3734;
+  --accent:#ef8a45; --base:#4a5551; --ok:#4fb07c; --warn:#d9a441; --crit:#e5675a; --ahead:#6aa5e0; --chip:#262d2a; --sum:#c9d1cd; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font-family:var(--f-body);font-size:14px;line-height:1.45}
+.wrap{max-width:1240px;margin:0 auto;padding-block:20px 48px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:grid;gap:18px}
+h1{font-size:22px;margin:0;font-weight:600;text-wrap:balance}
+h2{font-size:15px;margin:0 0 10px;font-weight:600;text-wrap:balance}
+.eyebrow{font-family:var(--f-mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.top{display:flex;flex-wrap:wrap;gap:12px 24px;align-items:flex-end;justify-content:space-between}
+.top .ctl{display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap}
+.chip{display:inline-block;padding:2px 8px;border-radius:999px;background:var(--chip);font-size:12px;color:var(--muted)}
+.chip.demo{background:var(--accent);color:#fff}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px;min-width:0}
+.kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+.kpi{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px 14px}
+.kpi .v{font-size:24px;font-weight:600;font-variant-numeric:tabular-nums}
+.kpi .s{color:var(--muted);font-size:12px}
+.bar2{height:6px;background:var(--chip);border-radius:3px;position:relative;margin-top:8px;overflow:hidden}
+.bar2 i{position:absolute;inset:0 auto 0 0;background:var(--base)}
+.bar2 b{position:absolute;left:0;top:0;bottom:0;background:var(--accent)}
+.grid2{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:18px;align-items:start}
+.alerts{display:grid;gap:8px;max-height:620px;overflow:auto}
+.al{border-left:4px solid var(--warn);background:var(--chip);border-radius:4px;padding:8px 10px;font-size:13px}
+.al.crit{border-color:var(--crit)} .al.ok{border-color:var(--ok)} .al.info{border-color:var(--ahead)}
+.al .k{font-family:var(--f-mono);font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.gscroll{overflow:auto;max-height:640px}
+.gantt{display:grid;grid-template-columns:290px 1fr;font-size:12.5px}
+.gl{padding:4px 8px 4px 0;border-top:1px solid var(--line);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;background:var(--panel);position:sticky;left:0;z-index:3}
+.gl small{display:block;color:var(--muted);font-size:11px}
+.gl.sum{font-weight:600;cursor:pointer;user-select:none}
+.gl.sum:hover{color:var(--accent)}
+.gt{position:relative;border-top:1px solid var(--line);height:40px}
+.gt.sum{height:26px}
+.gh{position:sticky;top:0;z-index:4;background:var(--panel);height:22px;font-family:var(--f-mono);font-size:10.5px;color:var(--muted)}
+.gh.lab{left:0;z-index:5}
+.gh span{position:absolute;top:4px;transform:translateX(-2px);white-space:nowrap}
+.tick{position:absolute;top:0;bottom:0;border-left:1px dashed var(--line)}
+.bb{position:absolute;top:6px;height:6px;background:var(--base);border-radius:3px}
+.fb{position:absolute;top:16px;height:16px;border-radius:3px;background:var(--ok);opacity:.35}
+.fb.late{background:var(--crit)} .fb.ahead{background:var(--ahead)}
+.pf{position:absolute;top:16px;height:16px;border-radius:3px 0 0 3px;background:var(--ok)}
+.pf.late{background:var(--crit)} .pf.ahead{background:var(--ahead)}
+.sb{position:absolute;top:10px;height:6px;background:var(--sum);border-radius:1px}
+.sb::before,.sb::after{content:"";position:absolute;top:0;width:0;height:0;border-top:6px solid var(--sum)}
+.sb::before{left:0;border-right:5px solid transparent}
+.sb::after{right:0;border-left:5px solid transparent}
+.sb.late{background:var(--crit)}
+.today{position:absolute;top:0;bottom:0;border-left:2px solid var(--accent);z-index:2}
+.ms{position:absolute;top:13px;width:12px;height:12px;background:var(--fg);transform:translateX(-6px) rotate(45deg)}
+.legend{display:flex;flex-wrap:wrap;gap:14px;font-size:12px;color:var(--muted);margin-top:10px}
+.legend i{display:inline-block;width:18px;height:8px;border-radius:2px;margin-right:6px;vertical-align:middle}
+form.cc{display:grid;gap:10px}
+label{display:grid;gap:4px;font-size:12px;color:var(--muted)}
+input,select,textarea{font:inherit;color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:7px 9px;min-width:0;width:100%}
+input[type=range]{padding:0}
+button{font:inherit;border:1px solid var(--line);background:var(--chip);color:var(--fg);border-radius:6px;padding:7px 12px;cursor:pointer}
+button.pri{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,.gl.sum:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.pct{font-family:var(--f-mono);font-size:20px;font-variant-numeric:tabular-nums;min-width:56px}
+.diario{display:grid;gap:8px;margin-top:6px;max-height:420px;overflow:auto}
+.de{display:flex;gap:10px;align-items:flex-start;border-top:1px solid var(--line);padding-top:8px;font-size:13px}
+.de img{width:64px;height:64px;object-fit:cover;border-radius:4px;flex:none}
+.tscroll{overflow:auto;max-height:560px}
+table{border-collapse:collapse;width:100%;min-width:1000px;font-size:12.5px}
+th,td{border-top:1px solid var(--line);padding:5px 6px;text-align:left;vertical-align:middle}
+th{font-weight:500;color:var(--muted);font-size:11.5px;position:sticky;top:0;background:var(--panel);z-index:1}
+tr.sum td{font-weight:600;background:var(--chip)}
+td.n{font-variant-numeric:tabular-nums;font-family:var(--f-mono)}
+td input{padding:4px 6px}
+.late{color:var(--crit)} .ahead-t{color:var(--ahead)}
+pre.tpl{font-family:var(--f-mono);font-size:11.5px;background:var(--chip);padding:10px;border-radius:6px;overflow-x:auto;margin:0}
+.note{color:var(--muted);font-size:12.5px;max-width:75ch}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+.kpis3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:12px}
+.chart svg{width:100%;height:auto;display:block}
+.chart text{fill:var(--muted);font-family:var(--f-mono);font-size:11px}
+.chart .grid{stroke:var(--line);stroke-width:1}
+.chart .lb{fill:none;stroke:var(--base);stroke-width:2.5}
+.chart .lf{fill:none;stroke:var(--accent);stroke-width:2.5;stroke-dasharray:6 4}
+.chart .ev{fill:var(--accent)}
+.chart .now{stroke:var(--accent);stroke-width:1;stroke-dasharray:2 3}
+tr.cur td{background:var(--chip)}
+.caps{display:flex;flex-wrap:wrap;gap:8px 14px;margin-bottom:10px}
+.caps label{display:flex;gap:6px;align-items:center;font-size:12.5px;color:var(--fg)}
+.caps input{width:64px;padding:4px 6px}
+@media (max-width:900px){.grid2,.two{grid-template-columns:minmax(0,1fr)}.kpis3{grid-template-columns:minmax(0,1fr)}.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.gantt{grid-template-columns:180px 1fr}}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <div class="top">
+    <div>
+      <div class="eyebrow">Programma lavori · monitoraggio</div>
+      <h1 id="nomeCommessa">Commessa</h1>
+      <div class="row" style="margin-top:6px"><span class="chip demo">Demo</span><span class="chip" id="chipBase"></span><span class="chip" id="chipSim" hidden>Avanzamenti simulati</span></div>
+    </div>
+    <div class="ctl">
+      <label for="stato">Data di aggiornamento<input type="date" id="stato"></label>
+      <label for="cal">Calendario<select id="cal"><option value="lav">lun–ven</option><option value="cal">tutti i giorni</option></select></label>
+      <button id="sim" type="button" title="Riempie gli avanzamenti alla data di aggiornamento, con alcune attività in ritardo">Simula avanzamento</button>
+      <button id="reset" type="button">Torna all'esempio</button>
+    </div>
+  </div>
+
+  <div class="kpis" id="kpis"></div>
+
+  <div class="grid2">
+    <div class="panel">
+      <h2>Programma: baseline congelata e previsione</h2>
+      <div class="gscroll" id="gscroll"><div class="gantt" id="gantt"></div></div>
+      <div class="legend">
+        <span><i style="background:var(--base)"></i>Baseline (approvata, non cambia)</span>
+        <span><i style="background:var(--ok)"></i>Previsione in linea</span>
+        <span><i style="background:var(--crit)"></i>Previsione in ritardo</span>
+        <span><i style="background:var(--ahead)"></i>In anticipo</span>
+        <span><i style="background:var(--accent);width:3px"></i>Data di aggiornamento</span>
+        <span>Clic su una fase per chiuderla o aprirla</span>
+      </div>
+    </div>
+    <div class="panel">
+      <h2>Allerte per il planner</h2>
+      <div class="alerts" id="alerts"></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Produzione economica: curva S</h2>
+    <p class="note" style="margin:0 0 10px">L'importo di ogni attività si distribuisce in modo lineare sui suoi giorni lavorativi. La linea grigia è la baseline, la linea arancione tratteggiata è la previsione: prodotto a oggi più il residuo sulle date previste.</p>
+    <div class="kpis3" id="evk"></div>
+    <div class="chart" id="curva"></div>
+    <div class="tscroll" style="max-height:280px;margin-top:10px"><table id="mesi" style="min-width:560px"></table></div>
+  </div>
+
+  <div class="two">
+    <div class="panel">
+      <h2>Dal cantiere: aggiorna avanzamento</h2>
+      <p class="note" style="margin:0 0 10px">Lo compila il capo cantiere dal telefono: attività, percentuale, una foto. Il programma si ricalcola da solo.</p>
+      <form class="cc" id="ccForm">
+        <label for="ccAtt">Attività<select id="ccAtt"></select></label>
+        <label for="ccPct">Avanzamento fisico
+          <div class="row"><input type="range" id="ccPct" min="0" max="100" step="5" style="flex:1"><span class="pct" id="ccPctV">0%</span></div>
+        </label>
+        <label for="ccNota">Nota<input id="ccNota" placeholder="es. ieri vento forte, ponteggio fermo mezza giornata"></label>
+        <label for="ccFoto">Foto<input type="file" id="ccFoto" accept="image/*"></label>
+        <div><button class="pri" type="submit">Registra avanzamento</button></div>
+      </form>
+    </div>
+    <div class="panel">
+      <h2>Giornale dei lavori</h2>
+      <div class="diario" id="diario"></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Programma, vincoli di procurement e progettazione</h2>
+    <p class="note" style="margin:0 0 10px">Le date di consegna materiale e di approvazione dell'elaborato diventano vincoli: se arrivano dopo l'inizio previsto, l'attività slitta e parte l'allerta. Scostamenti in giorni del calendario scelto.</p>
+    <div class="row" style="margin-bottom:10px">
+      <label for="msNome" style="min-width:220px">Milestone contrattuale<input id="msNome"></label>
+      <label for="msData">Data<input type="date" id="msData"></label>
+      <label for="msPen">Penale €/giorno<input type="number" id="msPen" min="0" step="50"></label>
+    </div>
+    <div class="eyebrow" style="margin-bottom:6px">Risorse: quante unità hai a disposizione (es. 1 PLE, 2 escavatori)</div>
+    <div class="caps" id="risorse"></div>
+    <div class="tscroll"><table id="tab"></table></div>
+    <div class="row" style="margin-top:10px"><button type="button" id="copiaAgg">Copia programma aggiornato (per Excel)</button><span class="note" id="copiaMsg"></span></div>
+  </div>
+
+  <div class="panel">
+    <h2>Importa il programma (Excel, Project, Primavera P6)</h2>
+    <p class="note" style="margin:0 0 10px">Da Project o P6 esporta in Excel, oppure copia le righe e incollale qui sotto. Servono le colonne Nome attività, Inizio, Fine e Predecessori; Durata, Unità di misura, Quantità, Importo, Nomi risorse, Resa e Responsabile sono facoltative. Dall'XML di Project (Salva con nome → XML) si leggono attività, struttura, legami, risorse assegnate, baseline e percentuale completata. Senza colonna ID si usa il numero di riga, come in Project. Le fasi (righe rientrate con sotto-attività) diventano gruppi. I legami accettati: 12, 12FI, 12II+2 g, 12FF, 12IF e gli equivalenti inglesi FS, SS, FF, SF. Il programma importato diventa la baseline congelata.</p>
+    <div class="two">
+      <div style="display:grid;gap:10px">
+        <label for="file">File .xlsx / .csv / .xml di Project<input type="file" id="file" accept=".xlsx,.xls,.csv,.xml"></label>
+        <label for="incolla">Oppure incolla da Excel<textarea id="incolla" rows="6" placeholder="Incolla qui le righe, intestazioni comprese"></textarea></label>
+        <div class="row"><button type="button" class="pri" id="importa">Importa e congela baseline</button><span class="note" id="impMsg"></span></div>
+      </div>
+      <div>
+        <div class="eyebrow" style="margin-bottom:6px">Formato minimo (come l'output di MS Project)</div>
+<pre class="tpl" id="tpl">Nome attività	Durata	Inizio	Fine	Predecessori	Unità di misura	Quantità	Importo	Nomi risorse
+Fondazioni	15 g	04/06/2027	24/06/2027
+   Casserature travi e plinti	5 g	04/06/2027	10/06/2027		m²	160	12.000	Carpentieri[3]
+   Posa armature fondazioni	13 g	08/06/2027	24/06/2027	2II+2 g	kg	11000	24.000	Ferraioli[4]
+   Getto calcestruzzo	2 g	25/06/2027	28/06/2027	3	m³	95	14.000	Autopompa</pre>
+        <div class="row" style="margin-top:8px"><button type="button" id="copiaTpl">Copia modello</button></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script id="engine">
+/* ===== Motore: niente DOM qui, si può provare a parte ===== */
+const DAY=864e5;
+const iso=n=>new Date(n*DAY).toISOString().slice(0,10);
+const fmt=n=>{const d=new Date(n*DAY);return String(d.getUTCDate()).padStart(2,'0')+'/'+String(d.getUTCMonth()+1).padStart(2,'0');};
+const fmtY=n=>fmt(n)+'/'+new Date(n*DAY).getUTCFullYear();
+function D(s){
+  if(s===null||s===undefined||s==='')return NaN;
+  if(s instanceof Date)return Math.floor(Date.UTC(s.getFullYear(),s.getMonth(),s.getDate())/DAY);
+  if(typeof s==='number')return s>30000&&s<90000?Math.floor(s)-25569:NaN;
+  s=String(s).trim();let m;
+  if(m=s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/))return Date.UTC(+m[1],m[2]-1,+m[3])/DAY;
+  if(m=s.match(/(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})/)){let y=+m[3];if(y<100)y+=2000;return Date.UTC(y,m[2]-1,+m[1])/DAY;}
+  if(/^\d{5}(\.\d+)?$/.test(s))return D(+s);
+  return NaN;
+}
+// Calendario
+let CAL='lav';
+const isWD=n=>CAL==='cal'||((((n+4)%7)+7)%7>=1&&(((n+4)%7)+7)%7<=5);
+const nextWD=n=>{while(!isWD(n))n++;return n;};
+const prevWD=n=>{while(!isWD(n))n--;return n;};
+function addWD(n,k){n=k>=0?nextWD(n):prevWD(n);while(k>0){n++;if(isWD(n))k--;}while(k<0){n--;if(isWD(n))k++;}return n;}
+function wdBetween(a,b){if(b<a)return 0;let c=0;for(let n=a;n<=b;n++)if(isWD(n))c++;return c;}
+const slipWD=(base,prev)=>prev>base?wdBetween(base+1,prev):prev<base?-wdBetween(prev+1,base):0;
+
+// Legami: "12", "12FI", "22II+2 g", "47FI+7 g", "5FS-1d", "3SS"
+const TYPES={FI:'FS',II:'SS',FF:'FF',IF:'SF',FS:'FS',SS:'SS',SF:'SF'};
+function parseLinks(v){
+  if(v===null||v===undefined||v==='')return [];
+  return String(v).split(/[;,]/).map(t=>t.trim()).filter(Boolean).map(t=>{
+    const m=t.match(/^([A-Za-z0-9._-]*?\d[A-Za-z0-9._-]*?)\s*(FI|II|FF|IF|FS|SS|SF)?\s*([+-]\s*\d+(?:[.,]\d+)?)?\s*[a-z]*\s*$/i);
+    if(!m)return {id:t,type:'FS',lag:0};
+    return {id:m[1],type:TYPES[(m[2]||'FS').toUpperCase()],lag:m[3]?Math.round(parseFloat(m[3].replace(/\s/g,'').replace(',','.'))):0};
+  });
+}
+const linkTxt=l=>l.id+(l.type!=='FS'||l.lag?({FS:'FI',SS:'II',FF:'FF',SF:'IF'}[l.type]):'')+(l.lag?(l.lag>0?'+':'')+l.lag+' g':'');
+
+function compute(S){
+  CAL=S.cal||'lav';
+  const by=Object.fromEntries(S.att.map(a=>[a.id,a]));
+  const leaves=S.att.filter(a=>!a.sum);
+  const order=[],done=new Set();
+  const visit=(a,stack)=>{if(done.has(a.id)||stack.has(a.id))return;stack.add(a.id);a.links.forEach(l=>by[l.id]&&!by[l.id].sum&&visit(by[l.id],stack));done.add(a.id);order.push(a);};
+  leaves.forEach(a=>visit(a,new Set()));
+  const st=S.stato,out={};
+  for(const a of order){
+    const dur=Math.max(1,wdBetween(a.bs,a.be));
+    let fs,fe,driver=null;
+    if(a.av>=100){fs=a.bs;fe=Math.min(a.be,prevWD(st-1));}
+    else if(a.av>0){fs=a.bs;const rem=Math.ceil((1-a.av/100)*dur);fe=rem>0?addWD(nextWD(st),rem-1):prevWD(st-1);}
+    else{
+      let best=a.bs;const cand=(v,why)=>{if(v>best){best=v;driver=why;}};
+      for(const l of a.links){const p=out[l.id];if(!p)continue;const P=by[l.id];
+        if(l.type==='FS')cand(addWD(nextWD(p.fe+1),l.lag),{t:'pred',a:P});
+        else if(l.type==='SS')cand(addWD(p.fs,l.lag),{t:'pred',a:P});
+        else if(l.type==='FF')cand(addWD(addWD(p.fe,l.lag),-(dur-1)),{t:'pred',a:P});
+        else if(l.type==='SF')cand(addWD(addWD(p.fs,l.lag),-(dur-1)),{t:'pred',a:P});
+      }
+      if(a.bs<st)cand(nextWD(st),{t:'nonIniziata'});
+      if(a.consegna)cand(nextWD(a.consegna),{t:'consegna'});
+      if(a.elaborato)cand(nextWD(a.elaborato),{t:'elaborato'});
+      fs=nextWD(best);fe=addWD(fs,dur-1);
+    }
+    const el=st<=a.bs?0:wdBetween(a.bs,Math.min(st-1,a.be));
+    out[a.id]={fs,fe,dur,exp:el/dur*100,slip:slipWD(a.be,fe),driver};
+  }
+  // fasi
+  S.att.forEach((a,i)=>{if(!a.sum)return;const ch=[];for(let j=i+1;j<S.att.length&&S.att[j].lvl>a.lvl;j++)if(!S.att[j].sum&&out[S.att[j].id])ch.push(S.att[j]);
+    if(!ch.length){out[a.id]={fs:a.bs,fe:a.be,dur:1,exp:0,slip:0,av:0};return;}
+    const td=ch.reduce((s,c)=>s+out[c.id].dur,0);
+    const fe=Math.max(...ch.map(c=>out[c.id].fe));
+    out[a.id]={fs:Math.min(...ch.map(c=>out[c.id].fs)),fe,dur:td,exp:ch.reduce((s,c)=>s+out[c.id].exp*out[c.id].dur,0)/td,av:ch.reduce((s,c)=>s+c.av*out[c.id].dur,0)/td,slip:slipWD(a.be,fe)};
+  });
+  const sd=leaves.reduce((s,a)=>s+out[a.id].dur,0)||1;
+  const pPlan=leaves.reduce((s,a)=>s+out[a.id].exp*out[a.id].dur,0)/sd;
+  const pReal=leaves.reduce((s,a)=>s+a.av*out[a.id].dur,0)/sd;
+  const baseEnd=Math.max(...leaves.map(a=>a.be));
+  const fEnd=Math.max(...leaves.map(a=>out[a.id].fe));
+  return {out,by,pPlan,pReal,baseEnd,fEnd,leaves};
+}
+
+function alerts(S,C){
+  const L=[],{out}=C,st=S.stato,LOOK=28;
+  const who=a=>a.resp?` Avvisare <b>${a.resp}</b>.`:'';
+  let ripple=0;
+  for(const a of C.leaves){
+    const o=out[a.id];
+    if(a.av===0&&a.bs<st&&o.driver&&o.driver.t==='nonIniziata')L.push({l:'crit',k:'Cantiere',t:`<b>${a.nome}</b> doveva iniziare il ${fmt(a.bs)} e non è iniziata. Inizio previsto ${fmt(o.fs)}.`});
+    if(a.av>0&&a.av<100&&a.av<o.exp-10)L.push({l:'warn',k:'Avanzamento',t:`<b>${a.nome}</b> è al ${a.av}%, a oggi dovrebbe essere al ${Math.round(o.exp)}%. Se continua così finisce il ${fmt(o.fe)} invece del ${fmt(a.be)} (${o.slip>0?'+':''}${o.slip} gg).`});
+    if(a.av>0&&a.av<100&&o.slip<0)L.push({l:'info',k:'Avanzamento',t:`<b>${a.nome}</b> è in anticipo di ${-o.slip} gg.`});
+    if(a.av<100&&a.consegna&&a.consegna>a.bs)L.push({l:'crit',k:'Procurement',t:`Consegna materiale per <b>${a.nome}</b> prevista il ${fmt(a.consegna)}, dopo l'inizio programmato (${fmt(a.bs)}). Sollecitare il fornitore.`});
+    if(a.av<100&&a.elaborato&&a.elaborato>a.bs)L.push({l:'crit',k:'Progettazione',t:`Elaborato per <b>${a.nome}</b> approvato solo il ${fmt(a.elaborato)}, inizio programmato ${fmt(a.bs)}: la squadra resterebbe ferma.`});
+    if(a.av===0&&o.slip>0&&o.driver&&o.driver.t==='pred'){
+      if(a.bs<=st+LOOK)L.push({l:'warn',k:'Prossime 4 settimane',t:`<b>${a.nome}</b> doveva iniziare il ${fmt(a.bs)}, slitta al ${fmt(o.fs)} perché <b>${o.driver.a.nome}</b> è in ritardo.${who(a)}`});
+      else ripple++;
+    }
+  }
+  if(ripple)L.push({l:'info',k:'Effetto a cascata',t:`Altre ${ripple} attività più avanti nel programma slittano per i ritardi a monte. Le vedi in rosso nel Gantt.`});
+  for(const o of overalloc(S,C))L.push({l:'warn',k:'Risorse',t:`<b>${o.r}</b> sovrallocata: per ${o.giorni} gg tra il ${fmt(o.from)} e il ${fmt(o.to)} ne servono fino a ${+o.max.toFixed(2)}, disponibili ${o.cap}. Attività: ${o.acts.join(', ')}.`});
+  const E=economia(S,C);
+  if(E.tot&&E.pv>0&&E.sv<-0.05*E.pv)L.push({l:'warn',k:'Produzione',t:`Prodotto a oggi ${eur(E.ev)} contro ${eur(E.pv)} pianificati: ${eur(E.sv)} (${Math.round(E.sv/E.pv*100)}%).`});
+  const d=slipWD(S.ms.data,C.fEnd);
+  if(d>0)L.unshift({l:'crit',k:'Milestone',t:`<b>${S.ms.nome}</b> a rischio: fine prevista ${fmtY(C.fEnd)}, contrattuale ${fmtY(S.ms.data)}. ${d} gg di ritardo${S.ms.penale?`, penale stimata <b>${(d*S.ms.penale).toLocaleString('it-IT')} €</b>`:''}.`});
+  else L.unshift({l:'ok',k:'Milestone',t:`<b>${S.ms.nome}</b> rispettata: fine prevista ${fmtY(C.fEnd)} (margine ${-d} gg).`});
+  const ord={crit:0,warn:1,info:2,ok:3};
+  return L.sort((x,y)=>ord[x.l]-ord[y.l]);
+}
+
+// Import
+const norm=s=>String(s??'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-z0-9 ]/g,' ').replace(/\s+/g,' ').trim();
+const MAP={id:['id','n','nr','numero','codice','wbs','task id','activity id'],nome:['nome attivita','attivita','nome','descrizione','task name','nome task','activity name','activity'],
+  inizio:['inizio','data inizio','start','start date','begin'],fine:['fine','data fine','finish','finish date','end','end date'],
+  pred:['predecessori','pred','predecessors','predecessor'],qta:['quantita','qta','qty','quantity'],um:['unita di misura','um','unita','unit'],resp:['responsabile','impresa','resp','subappaltatore'],ris:['nomi risorse','risorse','risorsa','resource names','resources'],
+  importo:['importo','costo','costo previsto','budget','cost','valore','importo previsto'],resa:['resa','resa giornaliera','produttivita'],
+  durata:['durata','duration']};
+function fromTable(rows){
+  // rows: array di array. Trova la riga d'intestazione.
+  const hi=rows.findIndex(r=>r&&r.some(c=>MAP.inizio.includes(norm(c)))&&r.some(c=>MAP.fine.includes(norm(c))));
+  if(hi<0)throw new Error('Non trovo le colonne Inizio e Fine.');
+  const H=rows[hi].map(norm),col={};
+  for(const [k,alts] of Object.entries(MAP)){const i=H.findIndex(h=>alts.includes(h));if(i>=0)col[k]=i;}
+  if(col.nome===undefined)throw new Error('Manca la colonna Nome attività.');
+  const data=rows.slice(hi+1).filter(r=>r&&String(r[col.nome]??'').trim());
+  const att=[];
+  data.forEach((r,i)=>{
+    const raw=String(r[col.nome]);const bs=D(r[col.inizio]),be=D(r[col.fine]);
+    if(isNaN(bs)||isNaN(be))return;
+    const q=col.qta!==undefined?parseNum(r[col.qta]):NaN,imp=col.importo!==undefined?parseNum(r[col.importo]):NaN,rs=col.resa!==undefined?parseNum(r[col.resa]):NaN;
+    att.push({id:col.id!==undefined&&String(r[col.id]).trim()?String(r[col.id]).trim():String(i+1),nome:raw.trim(),lvl:raw.length-raw.trimStart().length,
+      bs,be:Math.max(bs,be),links:parseLinks(col.pred!==undefined?r[col.pred]:''),qta:isNaN(q)?null:q,um:col.um!==undefined?String(r[col.um]??''):'',resp:col.resp!==undefined?String(r[col.resp]??''):'',
+      ris:col.ris!==undefined?parseRes(r[col.ris]):[],importo:isNaN(imp)?null:imp,resa:isNaN(rs)||rs<=0?null:rs,
+      av:0,consegna:null,elaborato:null,sum:false});
+  });
+  if(!att.length)throw new Error('Nessuna attività con date leggibili (usa gg/mm/aaaa).');
+  att.forEach((a,i)=>{const n=att[i+1];a.sum=!!(n&&n.lvl>a.lvl);});
+  // livelli relativi
+  const lv=[...new Set(att.map(a=>a.lvl))].sort((x,y)=>x-y);att.forEach(a=>a.lvl=lv.indexOf(a.lvl));
+  return att;
+}
+
+function parseNum(v){
+  if(typeof v==='number')return v;
+  let s=String(v??'').replace(/[€\s]/g,'');if(!s)return NaN;
+  if(s.includes(',')&&s.includes('.'))s=s.replace(/\./g,'').replace(',','.');
+  else if(s.includes(','))s=s.replace(',','.');
+  else if(/^\d{1,3}(\.\d{3})+$/.test(s))s=s.replace(/\./g,'');
+  return parseFloat(s);
+}
+const eur=n=>Math.round(n).toLocaleString('it-IT')+' €';
+// Risorse alla Project: "PLE", "Escavatore[2]", "Squadra[50%]"
+function parseRes(v){
+  if(v===null||v===undefined||v==='')return [];
+  return String(v).split(/[;,]/).map(t=>t.trim()).filter(Boolean).map(t=>{
+    const m=t.match(/^(.*?)\s*\[\s*([\d.,]+)\s*(%?)\s*\]\s*$/);
+    if(!m)return {n:t,q:1};
+    let q=parseFloat(m[2].replace(',','.'));if(m[3])q=q/100;return {n:m[1].trim(),q:isNaN(q)?1:q};
+  });
+}
+const resTxt=r=>(r||[]).map(x=>x.n+(x.q!==1?'['+(+x.q.toFixed(2))+']':'')).join('; ');
+
+// XML di Microsoft Project (MSPDI)
+function fromMSPDI(xml){
+  const un=s=>s.replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').replace(/&apos;/g,"'").replace(/&amp;/g,'&');
+  const tag=(b,t)=>{const m=b.match(new RegExp('<'+t+'>([\\s\\S]*?)</'+t+'>'));return m?un(m[1].trim()):'';};
+  const blocks=(b,t)=>b.match(new RegExp('<'+t+'>[\\s\\S]*?</'+t+'>','g'))||[];
+  if(!/<Project[\s>]/.test(xml))throw new Error("Non sembra un XML di Microsoft Project.");
+  const sect=t=>(xml.match(new RegExp('<'+t+'>[\\s\\S]*?</'+t+'>'))||[''])[0];
+  const resName={};blocks(sect('Resources'),'Resource').forEach(b=>{const u=tag(b,'UID'),n=tag(b,'Name');if(u&&n)resName[u]=n;});
+  const tRes={};blocks(sect('Assignments'),'Assignment').forEach(b=>{const t=tag(b,'TaskUID'),r=tag(b,'ResourceUID');if(!resName[r])return;const q=parseFloat(tag(b,'Units')||'1');(tRes[t]=tRes[t]||[]).push({n:resName[r],q:isNaN(q)?1:q});});
+  const uid2id={},raw=[];
+  for(const b of blocks(sect('Tasks'),'Task')){
+    const head=b.split('<PredecessorLink>')[0].split('<Baseline>')[0];
+    const uid=tag(head,'UID'),id=tag(head,'ID'),name=tag(head,'Name');
+    if(!name||uid==='0'||tag(head,'IsNull')==='1')continue;
+    uid2id[uid]=id||uid;
+    let bs=D(tag(head,'Start')),be=D(tag(head,'Finish'));
+    const b0=blocks(b,'Baseline').find(x=>tag(x,'Number')==='0');
+    if(b0&&!isNaN(D(tag(b0,'Start')))&&!isNaN(D(tag(b0,'Finish')))){bs=D(tag(b0,'Start'));be=D(tag(b0,'Finish'));}
+    const pc=+tag(head,'PhysicalPercentComplete')||+tag(head,'PercentComplete')||0;
+    raw.push({uid,id:id||uid,nome:name,lvl:+(tag(head,'OutlineLevel')||1),sum:tag(head,'Summary')==='1',bs,be,av:Math.round(pc),
+      links:blocks(b,'PredecessorLink').map(l=>({uid:tag(l,'PredecessorUID'),type:{'0':'FF','1':'FS','2':'SF','3':'SS'}[tag(l,'Type')]||'FS',lag:Math.round((+tag(l,'LinkLag')||0)/4800)}))});
+  }
+  const att=raw.filter(t=>!isNaN(t.bs)&&!isNaN(t.be)).map(t=>({id:String(t.id),nome:t.nome,lvl:t.lvl,sum:t.sum,bs:t.bs,be:Math.max(t.bs,t.be),
+    links:t.links.filter(l=>uid2id[l.uid]).map(l=>({id:String(uid2id[l.uid]),type:l.type,lag:l.lag})),qta:null,um:'',resp:'',ris:tRes[t.uid]||[],importo:null,resa:null,
+    av:t.sum?0:Math.max(0,Math.min(100,t.av)),consegna:null,elaborato:null}));
+  if(!att.length)throw new Error("Nessuna attività con date nell'XML.");
+  const lv=[...new Set(att.map(a=>a.lvl))].sort((x,y)=>x-y);att.forEach(a=>a.lvl=lv.indexOf(a.lvl));
+  att.forEach((a,i)=>{const n=att[i+1];if(n&&n.lvl>a.lvl)a.sum=true;});
+  return att;
+}
+
+// Curva S: importi distribuiti linearmente sui giorni lavorativi
+function economia(S,C){
+  CAL=S.cal||'lav';const st=S.stato,{out}=C;
+  const L=C.leaves.filter(a=>a.importo>0);
+  const tot=L.reduce((s,a)=>s+a.importo,0);
+  if(!tot)return {tot:0};
+  const mk=n=>{const d=new Date(n*DAY);return d.getUTCFullYear()*12+d.getUTCMonth();};
+  const pm={},fm={};let pv=0,ev=0;
+  for(const a of L){
+    const o=out[a.id],d=Math.max(1,wdBetween(a.bs,a.be)),q=a.importo/d;
+    for(let n=a.bs;n<=a.be;n++)if(isWD(n)){const k=mk(n);pm[k]=(pm[k]||0)+q;if(n<st)pv+=q;}
+    ev+=a.importo*a.av/100;
+    const rest=a.importo*(1-a.av/100);
+    if(rest>0){const s0=Math.max(o.fs,st);
+      if(o.fe<s0)fm[mk(st)]=(fm[mk(st)]||0)+rest;
+      else{const r=rest/Math.max(1,wdBetween(s0,o.fe));for(let n=s0;n<=o.fe;n++)if(isWD(n)){const k=mk(n);fm[k]=(fm[k]||0)+r;}}}
+  }
+  const ms=mk(st),keys=[...Object.keys(pm),...Object.keys(fm)].map(Number);
+  const m0=Math.min(...keys,ms),m1=Math.max(...keys,ms);
+  const mesi=[];let cp=0,cf=0;
+  for(let m=m0;m<=m1;m++){
+    const p=pm[m]||0,f=fm[m]||0;cp+=p;
+    if(m>=ms)cf=(m===ms?ev:cf)+f;
+    mesi.push({m,lab:new Date(Date.UTC(Math.floor(m/12),m%12,1)).toLocaleDateString('it-IT',{month:'short',year:'2-digit',timeZone:'UTC'}),p,f,cp,cf:m>=ms?cf:null});
+  }
+  return {tot,pv,ev,sv:ev-pv,spi:pv>0?ev/pv:null,mesi,ms};
+}
+
+// Risorse sovrallocate sulle date previste
+function overalloc(S,C){
+  CAL=S.cal||'lav';const st=S.stato,cap=S.cap||{},use={},who={};
+  for(const a of C.leaves){if(a.av>=100||!a.ris||!a.ris.length)continue;const o=C.out[a.id];
+    for(let n=Math.max(o.fs,st);n<=o.fe;n++){if(!isWD(n))continue;for(const r of a.ris){const k=r.n+'|'+n;use[k]=(use[k]||0)+r.q;(who[k]=who[k]||[]).push(a.nome);}}}
+  const byRes={};
+  for(const k of Object.keys(use)){const i=k.lastIndexOf('|'),r=k.slice(0,i),n=+k.slice(i+1),c=cap[r]??1;if(use[k]>c+1e-9)(byRes[r]=byRes[r]||[]).push({n,u:use[k],acts:who[k]});}
+  return Object.entries(byRes).map(([r,ds])=>{ds.sort((x,y)=>x.n-y.n);return {r,cap:cap[r]??1,from:ds[0].n,to:ds[ds.length-1].n,max:Math.max(...ds.map(d=>d.u)),giorni:ds.length,acts:[...new Set(ds.flatMap(d=>d.acts))]};});
+}
+function parseText(txt){
+  const lines=txt.replace(/\r/g,'').split('\n').filter(l=>l.trim());
+  const sep=lines[0].includes('\t')?'\t':(lines[0].includes(';')?';':',');
+  return lines.map(l=>l.split(sep));
+}
+function simula(S){
+  // Riempie gli avanzamenti alla data di aggiornamento: in linea, salvo un'attività in corso su tre al 60% del previsto.
+  CAL=S.cal||'lav';let k=0;
+  for(const a of S.att){if(a.sum)continue;const dur=Math.max(1,wdBetween(a.bs,a.be));
+    const exp=S.stato<=a.bs?0:wdBetween(a.bs,Math.min(S.stato-1,a.be))/dur*100;
+    if(exp>=100)a.av=100;else if(exp<=0)a.av=0;else{k++;a.av=Math.max(5,Math.round(exp*(k%3===1?0.6:1)/5)*5);}
+  }
+}
+if(typeof module!=='undefined')module.exports={D,compute,alerts,fromTable,fromMSPDI,economia,overalloc,parseRes,parseNum,parseLinks,parseText,simula,fmtY,fmt,linkTxt};
+</script>
+
+<script>
+/* ===== Interfaccia ===== */
+function esempio(){
+  const L=ids=>ids.map(id=>({id,type:'FS',lag:0}));
+  return {
+    commessa:'Rifacimento facciata, condominio Via dei Tigli 14 (esempio)',
+    baselineAt:'02/11/2026',cal:'lav',sim:false,coll:[],cap:{'PLE':1,'Squadra facciate':1,'Squadra ponteggi':1},
+    stato:D('2026-11-19'),
+    ms:{nome:'Fine lavori contrattuale',data:D('2026-12-22'),penale:300},
+    att:[
+      {id:'1',nome:'Montaggio ponteggio e linee vita',lvl:0,sum:false,bs:D('2026-11-02'),be:D('2026-11-06'),links:[],qta:1200,um:'m²',resp:'Ponteggi Sud srl',av:100,importo:9000,ris:parseRes('Squadra ponteggi'),resa:null,consegna:null,elaborato:null},
+      {id:'2',nome:'Rimozione intonaco ammalorato',lvl:0,sum:false,bs:D('2026-11-09'),be:D('2026-11-13'),links:L(['1']),qta:850,um:'m²',resp:'Impresa',av:100,importo:6500,ris:parseRes('Squadra facciate'),resa:null,consegna:null,elaborato:null},
+      {id:'3',nome:'Cappotto termico EPS 12 cm',lvl:0,sum:false,bs:D('2026-11-16'),be:D('2026-12-04'),links:L(['2']),qta:850,um:'m²',resp:'Impresa',av:5,importo:51000,ris:parseRes('Squadra facciate'),resa:45,consegna:null,elaborato:null},
+      {id:'4',nome:'Rasatura e tinteggiatura',lvl:0,sum:false,bs:D('2026-12-07'),be:D('2026-12-17'),links:L(['3']),qta:850,um:'m²',resp:'Impresa',av:0,importo:21000,ris:parseRes('Squadra facciate; PLE'),resa:null,consegna:null,elaborato:null},
+      {id:'5',nome:'Posa serramenti',lvl:0,sum:false,bs:D('2026-12-07'),be:D('2026-12-11'),links:L(['3']),qta:24,um:'pz',resp:'Serramenti Rossi (subappalto)',av:0,importo:18000,ris:parseRes('PLE'),resa:null,consegna:D('2026-12-10'),elaborato:null},
+      {id:'6',nome:'Davanzali e lattonerie',lvl:0,sum:false,bs:D('2026-12-14'),be:D('2026-12-16'),links:L(['5']),qta:60,um:'m',resp:'Lattoneria Bianchi',av:0,importo:4500,ris:[],resa:null,consegna:null,elaborato:D('2026-12-15')},
+      {id:'7',nome:'Smontaggio ponteggio',lvl:0,sum:false,bs:D('2026-12-18'),be:D('2026-12-22'),links:L(['4','6']),qta:1200,um:'m²',resp:'Ponteggi Sud srl',av:0,importo:5000,ris:parseRes('Squadra ponteggi'),resa:null,consegna:null,elaborato:null},
+    ],
+    diario:[
+      {data:D('2026-11-06'),id:'1',av:100,nota:'Ponteggio collaudato, linee vita certificate.',foto:null},
+      {data:D('2026-11-13'),id:'2',av:100,nota:'Intonaco rimosso su tutti i prospetti.',foto:null},
+      {data:D('2026-11-18'),id:'3',av:5,nota:'Pannelli EPS arrivati solo per il prospetto nord. Due giorni di pioggia.',foto:null},
+    ]
+  };
+}
+
+const KEY='planner-demo-v3';
+let S;
+try{const raw=localStorage.getItem(KEY);S=raw?JSON.parse(raw):esempio();}catch(e){S=esempio();}
+function save(){try{localStorage.setItem(KEY,JSON.stringify({...S,diario:S.diario.map(d=>({...d,foto:null}))}));}catch(e){}}
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
+
+function hiddenSet(){
+  const coll=new Set(S.coll||[]),hid=new Set();
+  S.att.forEach((a,i)=>{if(a.sum&&coll.has(a.id))for(let j=i+1;j<S.att.length&&S.att[j].lvl>a.lvl;j++)hid.add(S.att[j].id);});
+  return hid;
+}
+
+function render(){
+  const C=compute(S),{out}=C;
+  $('nomeCommessa').textContent=S.commessa;
+  $('chipBase').textContent='Baseline congelata il '+S.baselineAt;
+  $('chipSim').hidden=!S.sim;
+  $('stato').value=iso(S.stato);$('cal').value=S.cal||'lav';
+  const AL=alerts(S,C);
+  const slipEnd=Math.max(0,slipWD(S.ms.data,C.fEnd));
+  const spi=C.pPlan>0?(C.pReal/C.pPlan):1;
+  const dEnd=(()=>{let c=0;if(C.fEnd>C.baseEnd)for(let n=C.baseEnd+1;n<=C.fEnd;n++)if(isWD(n))c++;return c;})();
+  $('kpis').innerHTML=`
+   <div class="kpi"><div class="eyebrow">Avanzamento commessa</div><div class="v">${C.pReal.toFixed(0)}%</div><div class="s">pianificato a oggi ${C.pPlan.toFixed(0)}%</div><div class="bar2"><i style="width:${C.pPlan}%"></i><b style="width:${C.pReal}%"></b></div></div>
+   <div class="kpi"><div class="eyebrow">Fine lavori prevista</div><div class="v ${dEnd>0?'late':''}">${fmtY(C.fEnd)}</div><div class="s">baseline ${fmtY(C.baseEnd)} · ${dEnd>0?'+'+dEnd+' gg':'in linea'}</div></div>
+   <div class="kpi"><div class="eyebrow">Penale stimata</div><div class="v ${slipEnd>0&&S.ms.penale?'late':''}">${S.ms.penale?(slipEnd*S.ms.penale).toLocaleString('it-IT')+' €':'—'}</div><div class="s">${S.ms.penale?S.ms.penale+' €/gg oltre il '+fmtY(S.ms.data):'imposta la penale qui sotto'}</div></div>
+   <div class="kpi"><div class="eyebrow">Indice di tempo (SPI)</div><div class="v ${spi<0.9?'late':''}">${C.pPlan>0?spi.toFixed(2):'—'}</div><div class="s">${AL.filter(a=>a.l==='crit').length} allerte critiche · ${AL.filter(a=>a.l==='warn').length} da seguire</div></div>`;
+  $('alerts').innerHTML=AL.map(a=>`<div class="al ${a.l==='crit'?'crit':a.l==='ok'?'ok':a.l==='info'?'info':''}"><div class="k">${a.k}</div>${a.t}</div>`).join('');
+
+  // Gantt
+  const hid=hiddenSet(),coll=new Set(S.coll||[]);
+  const t0=Math.min(...S.att.map(a=>a.bs),S.stato)-3;
+  const t1=Math.max(C.baseEnd,C.fEnd,S.ms.data,S.stato)+5;
+  const span=t1-t0+1,X=n=>((n-t0)/span*100);
+  const pxd=span>200?3:span>60?8:22;
+  $('gantt').style.minWidth=Math.max(760,290+span*pxd)+'px';
+  let ticks='',hdr='';const mesi=span>120;
+  for(let n=t0;n<=t1;n++){const dt=new Date(n*DAY);
+    if(mesi?dt.getUTCDate()===1:dt.getUTCDay()===1){ticks+=`<div class="tick" style="left:${X(n)}%"></div>`;hdr+=`<span style="left:${X(n)}%">${mesi?dt.toLocaleDateString('it-IT',{month:'short',year:'2-digit',timeZone:'UTC'}):fmt(n)}</span>`;}}
+  const today=`<div class="today" style="left:${X(S.stato)}%"></div>`;
+  let g=`<div class="gh lab"></div><div class="gh">${hdr}</div>`;
+  for(const a of S.att){
+    if(hid.has(a.id))continue;
+    const o=out[a.id],ind=`padding-left:${a.lvl*14}px`;
+    if(a.sum){
+      g+=`<div class="gl sum" tabindex="0" role="button" aria-expanded="${!coll.has(a.id)}" data-sum="${esc(a.id)}" style="${ind}" title="${esc(a.nome)}">${coll.has(a.id)?'▸':'▾'} ${esc(a.nome)}</div>
+      <div class="gt sum">${ticks}<div class="bb" style="top:3px;left:${X(a.bs)}%;width:${X(a.be+1)-X(a.bs)}%"></div><div class="sb ${o.slip>0?'late':''}" style="left:${X(o.fs)}%;width:${X(o.fe+1)-X(o.fs)}%"></div>${today}</div>`;
+    }else{
+      const cls=o.slip>0?'late':o.slip<0?'ahead':'',fw=X(o.fe+1)-X(o.fs);
+      g+=`<div class="gl" style="${ind}" title="${esc(a.nome)}">${esc(a.id)}. ${esc(a.nome)}<small>${a.resp?esc(a.resp)+' · ':''}${a.av}%${o.slip?` · ${o.slip>0?'+':''}${o.slip} gg`:''}</small></div>
+      <div class="gt">${ticks}
+        <div class="bb" style="left:${X(a.bs)}%;width:${X(a.be+1)-X(a.bs)}%" title="Baseline ${fmt(a.bs)}–${fmt(a.be)}"></div>
+        <div class="fb ${cls}" style="left:${X(o.fs)}%;width:${fw}%" title="Previsione ${fmt(o.fs)}–${fmt(o.fe)}"></div>
+        <div class="pf ${cls}" style="left:${X(o.fs)}%;width:${fw*a.av/100}%"></div>${today}
+      </div>`;
+    }
+  }
+  g+=`<div class="gl"><b>◆ ${esc(S.ms.nome)}</b><small>${fmtY(S.ms.data)}</small></div><div class="gt">${ticks}<div class="ms" style="left:${X(S.ms.data+1)}%"></div>${today}</div>`;
+  $('gantt').innerHTML=g;
+
+  // curva S
+  const E=economia(S,C);
+  if(!E.tot){$('evk').innerHTML='';$('curva').innerHTML='<p class="note">Nessun importo nel programma. Aggiungi la colonna Importo nell\'Excel oppure scrivi gli importi nella tabella del programma.</p>';$('mesi').innerHTML='';}
+  else{
+    $('evk').innerHTML=`<div class="kpi"><div class="eyebrow">Pianificato a oggi</div><div class="v">${eur(E.pv)}</div><div class="s">su ${eur(E.tot)} totali</div></div>
+     <div class="kpi"><div class="eyebrow">Prodotto a oggi</div><div class="v">${eur(E.ev)}</div><div class="s">importo × avanzamento fisico</div></div>
+     <div class="kpi"><div class="eyebrow">Scostamento economico</div><div class="v ${E.sv<0?'late':''}">${E.sv>0?'+':''}${eur(E.sv)}</div><div class="s">${E.spi!==null?'indice '+E.spi.toFixed(2):'—'}</div></div>`;
+    const W=760,H=240,l=70,r=12,t=12,b=30,w=W-l-r,h=H-t-b,N=E.mesi.length;
+    const ymax=Math.max(E.tot,...E.mesi.map(x=>x.cf||0))*1.05,Y=v=>t+h-v/ymax*h,Xe=i=>l+(i+1)/N*w;
+    const iMs=E.mesi.findIndex(x=>x.m===E.ms),sd=new Date(S.stato*DAY),dim=new Date(Date.UTC(sd.getUTCFullYear(),sd.getUTCMonth()+1,0)).getUTCDate();
+    const xNow=l+(iMs+(sd.getUTCDate()-1)/dim)/N*w;
+    let g='';for(let k=0;k<=4;k++){const v=ymax/4*k;g+=`<line class="grid" x1="${l}" x2="${W-r}" y1="${Y(v)}" y2="${Y(v)}"/><text x="${l-6}" y="${Y(v)+4}" text-anchor="end">${Math.round(v/1000).toLocaleString('it-IT')}k</text>`;}
+    const step=Math.ceil(N/8);E.mesi.forEach((x,i)=>{if(i%step===0)g+=`<text x="${l+(i+0.5)/N*w}" y="${H-10}" text-anchor="middle">${x.lab}</text>`;});
+    const pb=[`${l},${Y(0)}`,...E.mesi.map((x,i)=>`${Xe(i)},${Y(x.cp)}`)].join(' ');
+    const pf=[`${xNow},${Y(E.ev)}`,...E.mesi.slice(iMs).map((x,j)=>`${Xe(iMs+j)},${Y(x.cf)}`)].join(' ');
+    $('curva').innerHTML=`<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Curva S: importo cumulato pianificato e previsto">${g}<line class="now" x1="${xNow}" x2="${xNow}" y1="${t}" y2="${t+h}"/><polyline class="lb" points="${pb}"/><polyline class="lf" points="${pf}"/><circle class="ev" cx="${xNow}" cy="${Y(E.ev)}" r="5"/></svg>`;
+    $('mesi').innerHTML=`<tr><th>Mese</th><th>Pianificato nel mese</th><th>Pianificato cumulato</th><th>Previsto nel mese</th><th>Previsto cumulato</th></tr>`+
+      E.mesi.map(x=>`<tr class="${x.m===E.ms?'cur':''}"><td>${x.lab}${x.m===E.ms?' · oggi':''}</td><td class="n">${eur(x.p)}</td><td class="n">${eur(x.cp)}</td><td class="n">${x.cf===null?'—':eur(x.f)}</td><td class="n">${x.cf===null?'—':eur(x.cf)}</td></tr>`).join('');
+  }
+  // risorse disponibili
+  const nomiRis=[...new Set(C.leaves.flatMap(a=>(a.ris||[]).map(x=>x.n)))].sort();
+  $('risorse').innerHTML=nomiRis.length?nomiRis.map(n=>`<label>${esc(n)}<input type="number" min="0" step="1" data-cap="${esc(n)}" value="${(S.cap||{})[n]??1}" aria-label="Disponibilità ${esc(n)}"></label>`).join(''):'<span class="note">Nessuna risorsa assegnata: scrivila nella colonna Risorse della tabella (es. PLE; Escavatore[2]).</span>';
+
+  // form cantiere: prima le attività da aggiornare ora (in corso o in partenza nelle prossime 2 settimane)
+  const sel=$('ccAtt'),cur=sel.value,lv=C.leaves;
+  const ora=lv.filter(a=>a.av<100&&(a.av>0||out[a.id].fs<=S.stato+14));
+  const opt=a=>`<option value="${esc(a.id)}">${esc(a.id)}. ${esc(a.nome)} (${a.av}%)</option>`;
+  sel.innerHTML=(ora.length?`<optgroup label="Da aggiornare ora">${ora.map(opt).join('')}</optgroup>`:'')+`<optgroup label="Tutte le attività">${lv.map(opt).join('')}</optgroup>`;
+  if(cur&&lv.some(a=>a.id===cur))sel.value=cur;else if(ora[0])sel.value=ora[0].id;
+  syncPct();
+
+  // diario
+  $('diario').innerHTML=S.diario.slice().reverse().map(e=>{const a=C.by[e.id];return `<div class="de">${e.foto?`<img src="${e.foto}" alt="Foto di cantiere">`:''}<div><b>${fmtY(e.data)}</b> · ${a?esc(a.nome):'?'} → <b>${e.av}%</b><br><span class="note">${esc(e.nota)}</span></div></div>`;}).join('')||'<p class="note">Nessun aggiornamento ancora.</p>';
+
+  // tabella
+  $('msNome').value=S.ms.nome;$('msData').value=iso(S.ms.data);$('msPen').value=S.ms.penale;
+  let t=`<tr><th>ID</th><th>Attività</th><th>Responsabile</th><th>Inizio base</th><th>Fine base</th><th>Pred.</th><th>Quantità</th><th>Resa/g</th><th>Durata</th><th>Avanz. %</th><th>Importo €</th><th>Risorse</th><th>Consegna materiale</th><th>Elaborato approvato</th><th>Inizio prev.</th><th>Fine prev.</th><th>Scost.</th></tr>`;
+  for(const a of S.att){const o=out[a.id],sc=`<td class="n ${o.slip>0?'late':o.slip<0?'ahead-t':''}">${o.slip>0?'+':''}${o.slip}</td>`;
+    if(a.sum){t+=`<tr class="sum"><td class="n">${esc(a.id)}</td><td style="padding-left:${6+a.lvl*12}px">${esc(a.nome)}</td><td></td><td class="n">${fmt(a.bs)}</td><td class="n">${fmt(a.be)}</td><td></td><td></td><td></td><td></td><td class="n">${Math.round(o.av||0)}%</td><td class="n">${(()=>{const v=C.leaves.filter((c,ci)=>{const ix=S.att.indexOf(c),ia=S.att.indexOf(a);let j=ia+1;for(;j<S.att.length&&S.att[j].lvl>a.lvl;j++);return ix>ia&&ix<j;}).reduce((s2,c)=>s2+(c.importo||0),0);return v?eur(v):'';})()}</td><td></td><td></td><td></td><td class="n">${fmt(o.fs)}</td><td class="n">${fmt(o.fe)}</td>${sc}</tr>`;continue;}
+    t+=`<tr><td class="n">${esc(a.id)}</td><td style="padding-left:${6+a.lvl*12}px">${esc(a.nome)}</td><td><input data-k="resp" data-id="${esc(a.id)}" value="${esc(a.resp)}" aria-label="Responsabile ${esc(a.nome)}"></td>
+    <td class="n">${fmt(a.bs)}</td><td class="n">${fmt(a.be)}</td><td class="n">${a.links.map(linkTxt).join('; ')}</td><td class="n">${a.qta??''} ${esc(a.um)}</td>
+    <td><input type="number" min="0" step="any" data-k="resa" data-id="${esc(a.id)}" value="${a.resa??''}" style="width:70px" aria-label="Resa giornaliera ${esc(a.nome)}"></td>
+    <td class="n">${o.dur} gg${a.resa&&a.qta?(()=>{const dr=Math.ceil(a.qta/a.resa);return `<br><small class="${dr>o.dur?'late':''}">da resa ${dr}</small>`;})():''}</td>
+    <td><input type="number" min="0" max="100" step="5" data-k="av" data-id="${esc(a.id)}" value="${a.av}" style="width:70px" aria-label="Avanzamento ${esc(a.nome)}"></td>
+    <td><input type="text" inputmode="decimal" data-k="importo" data-id="${esc(a.id)}" value="${a.importo!=null?Math.round(a.importo).toLocaleString('it-IT'):''}" style="width:100px" aria-label="Importo ${esc(a.nome)}"></td>
+    <td><input data-k="ris" data-id="${esc(a.id)}" value="${esc(resTxt(a.ris))}" style="width:150px" aria-label="Risorse ${esc(a.nome)}"></td>
+    <td><input type="date" data-k="consegna" data-id="${esc(a.id)}" value="${a.consegna?iso(a.consegna):''}" aria-label="Consegna ${esc(a.nome)}"></td>
+    <td><input type="date" data-k="elaborato" data-id="${esc(a.id)}" value="${a.elaborato?iso(a.elaborato):''}" aria-label="Elaborato ${esc(a.nome)}"></td>
+    <td class="n">${fmt(o.fs)}</td><td class="n">${fmt(o.fe)}</td>${sc}</tr>`;}
+  $('tab').innerHTML=t;
+  save();
+}
+
+function syncPct(){const a=S.att.find(x=>x.id===$('ccAtt').value);if(!a)return;$('ccPct').value=a.av;$('ccPctV').textContent=a.av+'%';}
+$('ccAtt').addEventListener('change',syncPct);
+$('ccPct').addEventListener('input',e=>$('ccPctV').textContent=e.target.value+'%');
+$('ccForm').addEventListener('submit',e=>{
+  e.preventDefault();
+  const id=$('ccAtt').value,av=+$('ccPct').value,nota=$('ccNota').value.trim(),f=$('ccFoto').files[0];
+  const done=foto=>{const a=S.att.find(x=>x.id===id);a.av=av;S.diario.push({data:S.stato,id,av,nota,foto});$('ccNota').value='';$('ccFoto').value='';render();};
+  if(f){const r=new FileReader();r.onload=()=>done(r.result);r.readAsDataURL(f);}else done(null);
+});
+$('gantt').addEventListener('click',e=>{const el=e.target.closest('[data-sum]');if(!el)return;const id=el.dataset.sum,c=new Set(S.coll||[]);c.has(id)?c.delete(id):c.add(id);S.coll=[...c];render();});
+$('gantt').addEventListener('keydown',e=>{if((e.key==='Enter'||e.key===' ')&&e.target.dataset.sum){e.preventDefault();e.target.click();}});
+$('risorse').addEventListener('change',e=>{const n=e.target.dataset.cap;if(n===undefined)return;S.cap=S.cap||{};S.cap[n]=Math.max(0,+e.target.value||0);render();});
+$('stato').addEventListener('change',e=>{const n=D(e.target.value);if(!isNaN(n)){S.stato=n;render();}});
+$('cal').addEventListener('change',e=>{S.cal=e.target.value;render();});
+$('sim').addEventListener('click',()=>{simula(S);S.sim=true;render();});
+$('reset').addEventListener('click',()=>{S=esempio();render();});
+$('tab').addEventListener('change',e=>{
+  const el=e.target,a=S.att.find(x=>x.id===el.dataset.id);if(!a)return;const k=el.dataset.k;
+  if(k==='av')a.av=Math.max(0,Math.min(100,+el.value||0));
+  else if(k==='resp')a.resp=el.value;
+  else if(k==='ris')a.ris=parseRes(el.value);
+  else if(k==='importo'){const v=parseNum(el.value);a.importo=isNaN(v)?null:v;}
+  else if(k==='resa'){const v=parseNum(el.value);a.resa=isNaN(v)||v<=0?null:v;}
+  else{const n=D(el.value);a[k]=isNaN(n)?null:n;}
+  render();
+});
+['msNome','msData','msPen'].forEach(id=>$(id).addEventListener('change',()=>{
+  S.ms.nome=$('msNome').value;const n=D($('msData').value);if(!isNaN(n))S.ms.data=n;S.ms.penale=+$('msPen').value||0;render();}));
+
+async function copia(text,msgEl){
+  try{await navigator.clipboard.writeText(text);if(msgEl)msgEl.textContent='Copiato.';}
+  catch(e){const ta=document.createElement('textarea');ta.value=text;document.body.appendChild(ta);ta.select();try{document.execCommand('copy');if(msgEl)msgEl.textContent='Copiato.';}catch(_){if(msgEl)msgEl.textContent='Copia non riuscita: seleziona il testo a mano.';}ta.remove();}
+}
+$('copiaTpl').addEventListener('click',()=>copia($('tpl').textContent,null));
+$('copiaAgg').addEventListener('click',()=>{
+  const {out}=compute(S);
+  const rows=[['ID','Attività','Responsabile','Inizio base','Fine base','Predecessori','Avanzamento %','Inizio previsto','Fine prevista','Scostamento gg','Importo','Nomi risorse']];
+  S.att.forEach(a=>{const o=out[a.id];rows.push([a.id,' '.repeat(a.lvl*3)+a.nome,a.resp||'',fmtY(a.bs),fmtY(a.be),a.sum?'':a.links.map(linkTxt).join(';'),a.sum?Math.round(o.av||0):a.av,fmtY(o.fs),fmtY(o.fe),o.slip,a.importo??'',resTxt(a.ris)]);});
+  copia(rows.map(r=>r.join('\t')).join('\n'),$('copiaMsg'));
+});
+
+$('importa').addEventListener('click',async()=>{
+  const msg=$('impMsg');msg.textContent='';
+  try{
+    const f=$('file').files[0];let rows=null,att=null,nome='Programma importato',xml=false;
+    if(f){
+      nome=f.name.replace(/\.[^.]+$/,'');
+      if(/\.xml$/i.test(f.name)){att=fromMSPDI(await f.text());xml=true;}
+      else if(/\.csv$/i.test(f.name))rows=parseText(await f.text());
+      else{if(!window.XLSX)throw new Error('Lettore Excel non caricato: incolla le righe.');const wb=XLSX.read(await f.arrayBuffer(),{type:'array'});rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,defval:'',raw:true});}
+    }else{const t=$('incolla').value;if(!t.trim())throw new Error('Scegli un file o incolla le righe.');if(t.trim().startsWith('<')){att=fromMSPDI(t);xml=true;}else rows=parseText(t);}
+    if(!att)att=fromTable(rows);
+    const lf=att.filter(a=>!a.sum);
+    const bs=Math.min(...lf.map(a=>a.bs)),be=Math.max(...lf.map(a=>a.be)),oggi=Math.floor(Date.now()/DAY);
+    S={commessa:nome,baselineAt:fmtY(oggi),cal:S.cal||'lav',sim:false,coll:[],stato:Math.min(Math.max(oggi,bs),be),ms:{nome:'Fine lavori contrattuale',data:be,penale:0},att,diario:[],cap:{}};
+    render();
+    msg.textContent=`Importate ${lf.length} attività in ${att.length-lf.length} fasi. Baseline congelata.`+(xml?` Dall'XML: baseline, risorse e percentuali completate (${lf.filter(a=>a.av>0).length} attività avviate). Imposta la data di aggiornamento.`:` Prova «Simula avanzamento» dopo aver scelto una data di aggiornamento.`);
+  }catch(e){msg.textContent=e.message;}
+});
+
+render();
+</script>
+</body>
+</html>
